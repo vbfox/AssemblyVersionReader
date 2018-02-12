@@ -14,7 +14,7 @@ using RVA = System.UInt32;
 
 namespace PEFile
 {
-    sealed class ImageReader : BinaryStreamReader
+    sealed class ImageReader : BinaryReader
     {
         readonly Image image;
 
@@ -24,7 +24,7 @@ namespace PEFile
         uint table_heap_offset;
         byte heapSizes;
 
-        public ImageReader(Stream stream)
+        ImageReader(Stream stream)
             : base(stream)
         {
             image = new Image();
@@ -35,7 +35,7 @@ namespace PEFile
             BaseStream.Position = image.ResolveVirtualAddress(directory.VirtualAddress);
         }
 
-        public void ReadImage()
+        void ReadImage()
         {
             if (BaseStream.Length < 128)
                 throw new BadImageFormatException();
@@ -267,7 +267,7 @@ namespace PEFile
             for (int i = 0; i < streams; i++)
                 ReadMetadataStream(section.Value);
 
-            if (image.TableHeap != null)
+            if (table_heap_offset != 0)
                 ReadTableHeap();
         }
 
@@ -294,8 +294,6 @@ namespace PEFile
 
         void ReadTableHeap()
         {
-            var heap = image.TableHeap;
-
             MoveTo(table_heap_offset + image.MetadataSection.PointerToRawData);
 
             // Reserved			4
@@ -310,33 +308,29 @@ namespace PEFile
             Advance(1);
 
             // Valid			8
-            heap.Valid = ReadInt64();
+            image.TableHeap.Valid = ReadInt64();
 
             // Sorted			8
             Advance(8);
 
             for (int i = 0; i < TableHeap.TableCount; i++)
             {
-                if (!heap.HasTable((Table)i))
+                if (!image.TableHeap.HasTable((Table)i))
                     continue;
 
-                heap.Tables[i].Length = ReadUInt32();
+                image.TableHeap.Tables[i].Length = ReadUInt32();
             }
 
             ComputeTableInformations();
         }
         
-        int StringHeapIndexSize => (heapSizes & 0x1) > 0 ? 4 : 2;
-        int GuidHeapIndexSize => (heapSizes & 0x2) > 0 ? 4 : 2;
-        int BlobHeapIndexSize => (heapSizes & 0x4) > 0 ? 4 : 2;
-
         void ComputeTableInformations()
         {
             uint offset = (uint)BaseStream.Position - table_heap_offset - image.MetadataSection.PointerToRawData; // header
 
-            int stridx_size = StringHeapIndexSize;
-            int guididx_size = GuidHeapIndexSize;
-            int blobidx_size = BlobHeapIndexSize;
+            int stridx_size = (heapSizes & 0x1) > 0 ? 4 : 2;
+            int guididx_size = (heapSizes & 0x2) > 0 ? 4 : 2;
+            int blobidx_size = (heapSizes & 0x4) > 0 ? 4 : 2;
 
             var heap = image.TableHeap;
             var tables = heap.Tables;
@@ -506,6 +500,21 @@ namespace PEFile
             }
         }
 
+        private void Advance(int bytes)
+        {
+            BaseStream.Seek(bytes, SeekOrigin.Current);
+        }
+
+        private void MoveTo(uint position)
+        {
+            BaseStream.Seek(position, SeekOrigin.Begin);
+        }
+
+        private DataDirectory ReadDataDirectory()
+        {
+            return new DataDirectory(ReadUInt32(), ReadUInt32());
+        }
+
         private Version ReadAssemblyVersion()
         {
             if (!image.TableHeap.HasTable(Table.Assembly))
@@ -539,271 +548,250 @@ namespace PEFile
                 return null;
             }
         }
-    }
 
-    public class BinaryStreamReader : BinaryReader
-    {
-        public BinaryStreamReader(Stream stream)
-            : base(stream)
+        struct DataDirectory
         {
-        }
+            public readonly RVA VirtualAddress;
+            public readonly uint Size;
 
-        public void Advance(int bytes)
-        {
-            BaseStream.Seek(bytes, SeekOrigin.Current);
-        }
-
-        public void MoveTo(uint position)
-        {
-            BaseStream.Seek(position, SeekOrigin.Begin);
-        }
-
-        internal DataDirectory ReadDataDirectory()
-        {
-            return new DataDirectory(ReadUInt32(), ReadUInt32());
-        }
-    }
-
-    struct DataDirectory
-    {
-        public readonly RVA VirtualAddress;
-        public readonly uint Size;
-
-        public DataDirectory(RVA rva, uint size)
-        {
-            this.VirtualAddress = rva;
-            this.Size = size;
-        }
-    }
-
-    struct Section
-    {
-        public readonly RVA VirtualAddress;
-        public readonly uint SizeOfRawData;
-        public readonly uint PointerToRawData;
-
-        public Section(uint virtualAddress, uint sizeOfRawData, uint pointerToRawData)
-        {
-            VirtualAddress = virtualAddress;
-            SizeOfRawData = sizeOfRawData;
-            PointerToRawData = pointerToRawData;
-        }
-    }
-
-    enum CodedIndex
-    {
-        TypeDefOrRef,
-        HasConstant,
-        HasCustomAttribute,
-        HasFieldMarshal,
-        HasDeclSecurity,
-        MemberRefParent,
-        HasSemantics,
-        MethodDefOrRef,
-        MemberForwarded,
-        Implementation,
-        CustomAttributeType,
-        ResolutionScope,
-        TypeOrMethodDef,
-        HasCustomDebugInformation,
-    }
-
-    enum Table : byte
-    {
-        Module = 0x00,
-        TypeRef = 0x01,
-        TypeDef = 0x02,
-        FieldPtr = 0x03,
-        Field = 0x04,
-        MethodPtr = 0x05,
-        Method = 0x06,
-        ParamPtr = 0x07,
-        Param = 0x08,
-        InterfaceImpl = 0x09,
-        MemberRef = 0x0a,
-        Constant = 0x0b,
-        CustomAttribute = 0x0c,
-        FieldMarshal = 0x0d,
-        DeclSecurity = 0x0e,
-        ClassLayout = 0x0f,
-        FieldLayout = 0x10,
-        StandAloneSig = 0x11,
-        EventMap = 0x12,
-        EventPtr = 0x13,
-        Event = 0x14,
-        PropertyMap = 0x15,
-        PropertyPtr = 0x16,
-        Property = 0x17,
-        MethodSemantics = 0x18,
-        MethodImpl = 0x19,
-        ModuleRef = 0x1a,
-        TypeSpec = 0x1b,
-        ImplMap = 0x1c,
-        FieldRVA = 0x1d,
-        EncLog = 0x1e,
-        EncMap = 0x1f,
-        Assembly = 0x20,
-        AssemblyProcessor = 0x21,
-        AssemblyOS = 0x22,
-        AssemblyRef = 0x23,
-        AssemblyRefProcessor = 0x24,
-        AssemblyRefOS = 0x25,
-        File = 0x26,
-        ExportedType = 0x27,
-        ManifestResource = 0x28,
-        NestedClass = 0x29,
-        GenericParam = 0x2a,
-        MethodSpec = 0x2b,
-        GenericParamConstraint = 0x2c,
-    }
-
-    struct TableInformation
-    {
-        public uint Offset;
-        public uint Length;
-        public uint RowSize;
-    }
-
-    sealed class TableHeap
-    {
-        public const int TableCount = 58;
-        public long Valid;
-
-        public readonly TableInformation[] Tables = new TableInformation[TableCount];
-        public readonly uint offsetInFile;
-        public readonly uint size;
-
-        public TableHeap(uint offsetInFile, uint size)
-        {
-            this.offsetInFile = offsetInFile;
-            this.size = size;
-        }
-
-        public bool HasTable(Table table)
-        {
-            return (Valid & (1L << (int)table)) != 0;
-        }
-    }
-
-    sealed class Image
-    {
-        public Section[] Sections;
-
-        public Section MetadataSection;
-
-        public TableHeap TableHeap;
-
-        public uint ResolveVirtualAddress(RVA rva)
-        {
-            var section = GetSectionAtVirtualAddress(rva);
-            if (section == null)
-                throw new ArgumentOutOfRangeException();
-
-            return rva + section.Value.PointerToRawData - section.Value.VirtualAddress;
-        }
-
-        public Section? GetSectionAtVirtualAddress(RVA rva)
-        {
-            var sections = this.Sections;
-            for (int i = 0; i < sections.Length; i++)
+            public DataDirectory(RVA rva, uint size)
             {
-                var section = sections[i];
-                if (rva >= section.VirtualAddress && rva < section.VirtualAddress + section.SizeOfRawData)
-                    return section;
+                this.VirtualAddress = rva;
+                this.Size = size;
+            }
+        }
+
+        struct Section
+        {
+            public readonly RVA VirtualAddress;
+            public readonly uint SizeOfRawData;
+            public readonly uint PointerToRawData;
+
+            public Section(uint virtualAddress, uint sizeOfRawData, uint pointerToRawData)
+            {
+                VirtualAddress = virtualAddress;
+                SizeOfRawData = sizeOfRawData;
+                PointerToRawData = pointerToRawData;
+            }
+        }
+
+        enum CodedIndex
+        {
+            TypeDefOrRef,
+            HasConstant,
+            HasCustomAttribute,
+            HasFieldMarshal,
+            HasDeclSecurity,
+            MemberRefParent,
+            HasSemantics,
+            MethodDefOrRef,
+            MemberForwarded,
+            Implementation,
+            CustomAttributeType,
+            ResolutionScope,
+            TypeOrMethodDef,
+            HasCustomDebugInformation,
+        }
+
+        enum Table : byte
+        {
+            Module = 0x00,
+            TypeRef = 0x01,
+            TypeDef = 0x02,
+            FieldPtr = 0x03,
+            Field = 0x04,
+            MethodPtr = 0x05,
+            Method = 0x06,
+            ParamPtr = 0x07,
+            Param = 0x08,
+            InterfaceImpl = 0x09,
+            MemberRef = 0x0a,
+            Constant = 0x0b,
+            CustomAttribute = 0x0c,
+            FieldMarshal = 0x0d,
+            DeclSecurity = 0x0e,
+            ClassLayout = 0x0f,
+            FieldLayout = 0x10,
+            StandAloneSig = 0x11,
+            EventMap = 0x12,
+            EventPtr = 0x13,
+            Event = 0x14,
+            PropertyMap = 0x15,
+            PropertyPtr = 0x16,
+            Property = 0x17,
+            MethodSemantics = 0x18,
+            MethodImpl = 0x19,
+            ModuleRef = 0x1a,
+            TypeSpec = 0x1b,
+            ImplMap = 0x1c,
+            FieldRVA = 0x1d,
+            EncLog = 0x1e,
+            EncMap = 0x1f,
+            Assembly = 0x20,
+            AssemblyProcessor = 0x21,
+            AssemblyOS = 0x22,
+            AssemblyRef = 0x23,
+            AssemblyRefProcessor = 0x24,
+            AssemblyRefOS = 0x25,
+            File = 0x26,
+            ExportedType = 0x27,
+            ManifestResource = 0x28,
+            NestedClass = 0x29,
+            GenericParam = 0x2a,
+            MethodSpec = 0x2b,
+            GenericParamConstraint = 0x2c,
+        }
+
+        struct TableInformation
+        {
+            public uint Offset;
+            public uint Length;
+            public uint RowSize;
+        }
+
+        struct TableHeap
+        {
+            public const int TableCount = 58;
+            public long Valid;
+
+            public readonly TableInformation[] Tables;
+            public readonly uint offsetInFile;
+            public readonly uint size;
+
+            public TableHeap(uint offsetInFile, uint size)
+            {
+                Valid = 0;
+                Tables = new TableInformation[TableCount];
+                this.offsetInFile = offsetInFile;
+                this.size = size;
             }
 
-            return null;
-        }
-
-        public int GetTableLength(Table table)
-        {
-            return (int)TableHeap.Tables[(int)table].Length;
-        }
-
-        public int GetTableIndexSize(Table table)
-        {
-            return GetTableLength(table) < 65536 ? 2 : 4;
-        }
-
-        readonly int[] coded_index_sizes = new int[14];
-
-        public int GetCodedIndexSize(CodedIndex coded_index)
-        {
-            var size = coded_index_sizes[(int)coded_index];
-            if (size != 0)
-                return size;
-
-            return coded_index_sizes[(int)coded_index] = GetCodedIndexSize(coded_index, GetTableLength);
-        }
-
-        public static int GetCodedIndexSize(CodedIndex self, Func<Table, int> counter)
-        {
-            int bits;
-            Table[] tables;
-
-            switch (self)
+            public bool HasTable(Table table)
             {
-                case CodedIndex.TypeDefOrRef:
-                    bits = 2;
-                    tables = new[] { Table.TypeDef, Table.TypeRef, Table.TypeSpec };
-                    break;
-                case CodedIndex.HasConstant:
-                    bits = 2;
-                    tables = new[] { Table.Field, Table.Param, Table.Property };
-                    break;
-                case CodedIndex.HasCustomAttribute:
-                    bits = 5;
-                    tables = new[] {
+                return (Valid & (1L << (int)table)) != 0;
+            }
+        }
+
+        sealed class Image
+        {
+            public Section[] Sections;
+
+            public Section MetadataSection;
+
+            public TableHeap TableHeap;
+
+            public uint ResolveVirtualAddress(RVA rva)
+            {
+                var section = GetSectionAtVirtualAddress(rva);
+                if (section == null)
+                    throw new ArgumentOutOfRangeException();
+
+                return rva + section.Value.PointerToRawData - section.Value.VirtualAddress;
+            }
+
+            public Section? GetSectionAtVirtualAddress(RVA rva)
+            {
+                var sections = this.Sections;
+                for (int i = 0; i < sections.Length; i++)
+                {
+                    var section = sections[i];
+                    if (rva >= section.VirtualAddress && rva < section.VirtualAddress + section.SizeOfRawData)
+                        return section;
+                }
+
+                return null;
+            }
+
+            public int GetTableLength(Table table)
+            {
+                return (int)TableHeap.Tables[(int)table].Length;
+            }
+
+            public int GetTableIndexSize(Table table)
+            {
+                return GetTableLength(table) < 65536 ? 2 : 4;
+            }
+
+            readonly int[] coded_index_sizes = new int[14];
+
+            public int GetCodedIndexSize(CodedIndex coded_index)
+            {
+                var size = coded_index_sizes[(int)coded_index];
+                if (size != 0)
+                    return size;
+
+                return coded_index_sizes[(int)coded_index] = GetCodedIndexSize(coded_index, GetTableLength);
+            }
+
+            public static int GetCodedIndexSize(CodedIndex self, Func<Table, int> counter)
+            {
+                int bits;
+                Table[] tables;
+
+                switch (self)
+                {
+                    case CodedIndex.TypeDefOrRef:
+                        bits = 2;
+                        tables = new[] { Table.TypeDef, Table.TypeRef, Table.TypeSpec };
+                        break;
+                    case CodedIndex.HasConstant:
+                        bits = 2;
+                        tables = new[] { Table.Field, Table.Param, Table.Property };
+                        break;
+                    case CodedIndex.HasCustomAttribute:
+                        bits = 5;
+                        tables = new[] {
                     Table.Method, Table.Field, Table.TypeRef, Table.TypeDef, Table.Param, Table.InterfaceImpl, Table.MemberRef,
                     Table.Module, Table.DeclSecurity, Table.Property, Table.Event, Table.StandAloneSig, Table.ModuleRef,
                     Table.TypeSpec, Table.Assembly, Table.AssemblyRef, Table.File, Table.ExportedType,
                     Table.ManifestResource, Table.GenericParam, Table.GenericParamConstraint, Table.MethodSpec,
                 };
-                    break;
-                case CodedIndex.HasFieldMarshal:
-                    bits = 1;
-                    tables = new[] { Table.Field, Table.Param };
-                    break;
-                case CodedIndex.HasDeclSecurity:
-                    bits = 2;
-                    tables = new[] { Table.TypeDef, Table.Method, Table.Assembly };
-                    break;
-                case CodedIndex.MemberRefParent:
-                    bits = 3;
-                    tables = new[] { Table.TypeDef, Table.TypeRef, Table.ModuleRef, Table.Method, Table.TypeSpec };
-                    break;
-                case CodedIndex.HasSemantics:
-                    bits = 1;
-                    tables = new[] { Table.Event, Table.Property };
-                    break;
-                case CodedIndex.MethodDefOrRef:
-                    bits = 1;
-                    tables = new[] { Table.Method, Table.MemberRef };
-                    break;
-                case CodedIndex.MemberForwarded:
-                    bits = 1;
-                    tables = new[] { Table.Field, Table.Method };
-                    break;
-                case CodedIndex.CustomAttributeType:
-                    bits = 3;
-                    tables = new[] { Table.Method, Table.MemberRef };
-                    break;
-                case CodedIndex.ResolutionScope:
-                    bits = 2;
-                    tables = new[] { Table.Module, Table.ModuleRef, Table.AssemblyRef, Table.TypeRef };
-                    break;
-                default:
-                    throw new ArgumentException();
+                        break;
+                    case CodedIndex.HasFieldMarshal:
+                        bits = 1;
+                        tables = new[] { Table.Field, Table.Param };
+                        break;
+                    case CodedIndex.HasDeclSecurity:
+                        bits = 2;
+                        tables = new[] { Table.TypeDef, Table.Method, Table.Assembly };
+                        break;
+                    case CodedIndex.MemberRefParent:
+                        bits = 3;
+                        tables = new[] { Table.TypeDef, Table.TypeRef, Table.ModuleRef, Table.Method, Table.TypeSpec };
+                        break;
+                    case CodedIndex.HasSemantics:
+                        bits = 1;
+                        tables = new[] { Table.Event, Table.Property };
+                        break;
+                    case CodedIndex.MethodDefOrRef:
+                        bits = 1;
+                        tables = new[] { Table.Method, Table.MemberRef };
+                        break;
+                    case CodedIndex.MemberForwarded:
+                        bits = 1;
+                        tables = new[] { Table.Field, Table.Method };
+                        break;
+                    case CodedIndex.CustomAttributeType:
+                        bits = 3;
+                        tables = new[] { Table.Method, Table.MemberRef };
+                        break;
+                    case CodedIndex.ResolutionScope:
+                        bits = 2;
+                        tables = new[] { Table.Module, Table.ModuleRef, Table.AssemblyRef, Table.TypeRef };
+                        break;
+                    default:
+                        throw new ArgumentException();
+                }
+
+                int max = 0;
+
+                for (int i = 0; i < tables.Length; i++)
+                {
+                    max = System.Math.Max(counter(tables[i]), max);
+                }
+
+                return max < (1 << (16 - bits)) ? 2 : 4;
             }
-
-            int max = 0;
-
-            for (int i = 0; i < tables.Length; i++)
-            {
-                max = System.Math.Max(counter(tables[i]), max);
-            }
-
-            return max < (1 << (16 - bits)) ? 2 : 4;
         }
     }
 }
