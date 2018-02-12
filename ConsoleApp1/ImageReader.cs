@@ -502,96 +502,6 @@ namespace PEFile
                             + blobidx_size  // PublicKey
                             + (stridx_size * 2);    // Name, Culture
                         break;
-                    case Table.AssemblyProcessor:
-                        size = 4;   // Processor
-                        break;
-                    case Table.AssemblyOS:
-                        size = 12;  // Platform 4, Version 2 * 4
-                        break;
-                    case Table.AssemblyRef:
-                        size = 12   // Version 2 * 4 + Flags 4
-                            + (blobidx_size * 2)    // PublicKeyOrToken, HashValue
-                            + (stridx_size * 2);    // Name, Culture
-                        break;
-                    case Table.AssemblyRefProcessor:
-                        size = 4    // Processor
-                            + image.GetTableIndexSize(Table.AssemblyRef); // AssemblyRef
-                        break;
-                    case Table.AssemblyRefOS:
-                        size = 12   // Platform 4, Version 2 * 4
-                            + image.GetTableIndexSize(Table.AssemblyRef); // AssemblyRef
-                        break;
-                    case Table.File:
-                        size = 4    // Flags
-                            + stridx_size   // Name
-                            + blobidx_size; // HashValue
-                        break;
-                    case Table.ExportedType:
-                        size = 8    // Flags 4, TypeDefId 4
-                            + (stridx_size * 2) // Name, Namespace
-                            + image.GetCodedIndexSize(CodedIndex.Implementation); // Implementation
-                        break;
-                    case Table.ManifestResource:
-                        size = 8    // Offset, Flags
-                            + stridx_size   // Name
-                            + image.GetCodedIndexSize(CodedIndex.Implementation); // Implementation
-                        break;
-                    case Table.NestedClass:
-                        size = image.GetTableIndexSize(Table.TypeDef) // NestedClass
-                            + image.GetTableIndexSize(Table.TypeDef); // EnclosingClass
-                        break;
-                    case Table.GenericParam:
-                        size = 4    // Number, Flags
-                            + image.GetCodedIndexSize(CodedIndex.TypeOrMethodDef) // Owner
-                            + stridx_size;  // Name
-                        break;
-                    case Table.MethodSpec:
-                        size = image.GetCodedIndexSize(CodedIndex.MethodDefOrRef) // Method
-                            + blobidx_size; // Instantiation
-                        break;
-                    case Table.GenericParamConstraint:
-                        size = image.GetTableIndexSize(Table.GenericParam)    // Owner
-                            + image.GetCodedIndexSize(CodedIndex.TypeDefOrRef);   // Constraint
-                        break;
-                    case Table.Document:
-                        size = blobidx_size // Name
-                            + guididx_size  // HashAlgorithm
-                            + blobidx_size  // Hash
-                            + guididx_size; // Language
-                        break;
-                    case Table.MethodDebugInformation:
-                        size = image.GetTableIndexSize(Table.Document)  // Document
-                            + blobidx_size; // SequencePoints
-                        break;
-                    case Table.LocalScope:
-                        size = image.GetTableIndexSize(Table.Method)  // Method
-                            + image.GetTableIndexSize(Table.ImportScope)  // ImportScope
-                            + image.GetTableIndexSize(Table.LocalVariable)    // VariableList
-                            + image.GetTableIndexSize(Table.LocalConstant)    // ConstantList
-                            + 4 * 2;    // StartOffset, Length
-                        break;
-                    case Table.LocalVariable:
-                        size = 2    // Attributes
-                            + 2     // Index
-                            + stridx_size;  // Name
-                        break;
-                    case Table.LocalConstant:
-                        size = stridx_size  // Name
-                            + blobidx_size; // Signature
-                        break;
-                    case Table.ImportScope:
-                        size = image.GetTableIndexSize(Table.ImportScope) // Parent
-                            + blobidx_size;
-                        break;
-                    case Table.StateMachineMethod:
-                        size = image.GetTableIndexSize(Table.Method) // MoveNextMethod
-                            + image.GetTableIndexSize(Table.Method);  // KickOffMethod
-                        break;
-                    case Table.CustomDebugInformation:
-                        size = image.GetCodedIndexSize(CodedIndex.HasCustomDebugInformation) // Parent
-                            + guididx_size  // Kind
-                            + blobidx_size; // Value
-                        break;
                     default:
                         throw new NotSupportedException();
                 }
@@ -600,6 +510,11 @@ namespace PEFile
                 tables[i].Offset = offset;
 
                 offset += (uint)size * tables[i].Length;
+
+                if (table == Table.Assembly)
+                {
+                    return;
+                }
             }
         }
 
@@ -746,15 +661,6 @@ namespace PEFile
         GenericParam = 0x2a,
         MethodSpec = 0x2b,
         GenericParamConstraint = 0x2c,
-
-        Document = 0x30,
-        MethodDebugInformation = 0x31,
-        LocalScope = 0x32,
-        LocalVariable = 0x33,
-        LocalConstant = 0x34,
-        ImportScope = 0x35,
-        StateMachineMethod = 0x36,
-        CustomDebugInformation = 0x37,
     }
 
     struct TableInformation
@@ -797,11 +703,6 @@ namespace PEFile
             if (section == null)
                 throw new ArgumentOutOfRangeException();
 
-            return ResolveVirtualAddressInSection(rva, section);
-        }
-
-        public uint ResolveVirtualAddressInSection(RVA rva, Section section)
-        {
             return rva + section.PointerToRawData - section.VirtualAddress;
         }
 
@@ -832,12 +733,11 @@ namespace PEFile
 
         public int GetCodedIndexSize(CodedIndex coded_index)
         {
-            var index = (int)coded_index;
-            var size = coded_index_sizes[index];
+            var size = coded_index_sizes[(int)coded_index];
             if (size != 0)
                 return size;
 
-            return coded_index_sizes[index] = GetCodedIndexSize(coded_index, GetTableLength);
+            return coded_index_sizes[(int)coded_index] = GetCodedIndexSize(coded_index, GetTableLength);
         }
 
         public static int GetCodedIndexSize(CodedIndex self, Func<Table, int> counter)
@@ -888,10 +788,6 @@ namespace PEFile
                     bits = 1;
                     tables = new[] { Table.Field, Table.Method };
                     break;
-                case CodedIndex.Implementation:
-                    bits = 2;
-                    tables = new[] { Table.File, Table.AssemblyRef, Table.ExportedType };
-                    break;
                 case CodedIndex.CustomAttributeType:
                     bits = 3;
                     tables = new[] { Table.Method, Table.MemberRef };
@@ -899,20 +795,6 @@ namespace PEFile
                 case CodedIndex.ResolutionScope:
                     bits = 2;
                     tables = new[] { Table.Module, Table.ModuleRef, Table.AssemblyRef, Table.TypeRef };
-                    break;
-                case CodedIndex.TypeOrMethodDef:
-                    bits = 1;
-                    tables = new[] { Table.TypeDef, Table.Method };
-                    break;
-                case CodedIndex.HasCustomDebugInformation:
-                    bits = 5;
-                    tables = new[] {
-                    Table.Method, Table.Field, Table.TypeRef, Table.TypeDef, Table.Param, Table.InterfaceImpl, Table.MemberRef,
-                    Table.Module, Table.DeclSecurity, Table.Property, Table.Event, Table.StandAloneSig, Table.ModuleRef,
-                    Table.TypeSpec, Table.Assembly, Table.AssemblyRef, Table.File, Table.ExportedType,
-                    Table.ManifestResource, Table.GenericParam, Table.GenericParamConstraint, Table.MethodSpec,
-                    Table.Document, Table.LocalScope, Table.LocalVariable, Table.LocalConstant, Table.ImportScope,
-                };
                     break;
                 default:
                     throw new ArgumentException();
