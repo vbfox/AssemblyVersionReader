@@ -74,14 +74,13 @@ namespace PEFile
             // Characteristics		2
             ushort characteristics = ReadUInt16();
 
-            ushort subsystem, dll_characteristics, linker_version;
-            ReadOptionalHeaders(out subsystem, out dll_characteristics, out linker_version);
+            ReadOptionalHeaders();
             ReadSections(sections);
             ReadCLIHeader();
             ReadMetadata();
         }
 
-        void ReadOptionalHeaders(out ushort subsystem, out ushort dll_characteristics, out ushort linker)
+        void ReadOptionalHeaders()
         {
             // - PEOptionalHeader
             //   - StandardFieldsHeader
@@ -91,7 +90,6 @@ namespace PEFile
 
             //						pe32 || pe64
 
-            linker = ReadUInt16();
             // CodeSize				4
             // InitializedDataSize	4
             // UninitializedDataSize4
@@ -114,13 +112,10 @@ namespace PEFile
             // ImageSize			4
             // HeaderSize			4
             // FileChecksum			4
-            Advance(64);
-
             // SubSystem			2
-            subsystem = ReadUInt16();
-
             // DLLFlags				2
-            dll_characteristics = ReadUInt16();
+            Advance(70);
+
             // StackReserveSize		4 || 8
             // StackCommitSize		4 || 8
             // HeapReserveSize		4 || 8
@@ -137,17 +132,10 @@ namespace PEFile
 
             // ResourceTable		8
 
-            ReadDataDirectory();
-
             // ExceptionTable		8
             // CertificateTable		8
             // BaseRelocationTable	8
-
-            Advance(24);
-
             // Debug				8
-            ReadDataDirectory();
-
             // Copyright			8
             // GlobalPtr			8
             // TLSTable				8
@@ -155,7 +143,7 @@ namespace PEFile
             // BoundImport			8
             // IAT					8
             // DelayImportDescriptor8
-            Advance(56);
+            Advance(96);
 
             // CLIHeader			8
             cli = ReadDataDirectory();
@@ -488,13 +476,13 @@ namespace PEFile
                         throw new NotSupportedException();
                 }
 
-                tables[i].RowSize = (uint)size;
                 tables[i].Offset = offset;
 
                 offset += (uint)size * tables[i].Length;
 
                 if (table == Table.Assembly)
                 {
+                    // Tables are in order, after Assembly there are others but we don't care
                     return;
                 }
             }
@@ -646,7 +634,6 @@ namespace PEFile
         {
             public uint Offset;
             public uint Length;
-            public uint RowSize;
         }
 
         struct TableHeap
