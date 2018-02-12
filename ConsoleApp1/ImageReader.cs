@@ -9,18 +9,13 @@
 //
 
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
 using RVA = System.UInt32;
-using TargetArchitecture = System.UInt16;
 
 namespace PEFile
 {
     sealed class ImageReader : BinaryStreamReader
     {
-
         public readonly Image image;
 
         DataDirectory cli;
@@ -609,13 +604,30 @@ namespace PEFile
             }
         }
 
-        public static Image ReadImage(Stream stream, string file_name)
+        public static Version ReadAssemblyVersion(Stream stream, string file_name)
         {
             try
             {
                 var reader = new ImageReader(stream, file_name);
                 reader.ReadImage();
-                return reader.image;
+
+                if (!reader.image.TableHeap.HasTable(Table.Assembly))
+                {
+                    return null;
+                }
+
+                var assemblyTable = reader.image.TableHeap.Tables[(int)Table.Assembly];
+
+                var headDataReader = new BinaryStreamReader(new MemoryStream(reader.image.TableHeap.data));
+                headDataReader.MoveTo(assemblyTable.Offset);
+                headDataReader.Advance(4);
+
+                var major = (ushort)headDataReader.ReadInt16();
+                var minor = (ushort)headDataReader.ReadInt16();
+                var build = (ushort)headDataReader.ReadInt16();
+                var revision = (ushort)headDataReader.ReadInt16();
+
+                return new Version(major, minor, build, revision);
             }
             catch (EndOfStreamException e)
             {

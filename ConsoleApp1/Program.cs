@@ -14,6 +14,10 @@ namespace ConsoleApp1
         {
             var f = @"G:\Code\vbfox-blog\paket.exe";
             var s = File.OpenRead(f);
+            var v = ImageReader.ReadAssemblyVersion(s, f);
+            Console.WriteLine("Version = {0}", v);
+            /*
+            var s = File.OpenRead(f);
             var reader = new ImageReader(s, f);
             reader.ReadImage();
             var x = reader.image;
@@ -30,6 +34,7 @@ namespace ConsoleApp1
             var dd = headDataReader.ReadInt16();
 
             Console.WriteLine("{0}.{1}.{2}.{3}", aa, bb, cc, dd);
+            */
             Console.ReadLine();
         }
     }
