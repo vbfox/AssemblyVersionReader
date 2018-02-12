@@ -279,27 +279,17 @@ namespace PEFile
             // Size			4
             uint size = ReadUInt32();
 
-            var data = ReadHeapData(offset, size);
+            var offsetInFile = offset + image.MetadataSection.PointerToRawData;
 
             var name = ReadAlignedString(16);
             switch (name)
             {
                 case "#~":
                 case "#-":
-                    image.TableHeap = new TableHeap(data);
+                    image.TableHeap = new TableHeap(offsetInFile, size);
                     table_heap_offset = offset;
                     break;
             }
-        }
-
-        byte[] ReadHeapData(uint offset, uint size)
-        {
-            var position = BaseStream.Position;
-            MoveTo(offset + image.MetadataSection.PointerToRawData);
-            var data = ReadBytes((int)size);
-            BaseStream.Position = position;
-
-            return data;
         }
 
         void ReadTableHeap()
@@ -525,14 +515,13 @@ namespace PEFile
 
             var assemblyTable = image.TableHeap.Tables[(int)Table.Assembly];
 
-            var headDataReader = new BinaryStreamReader(new MemoryStream(image.TableHeap.data));
-            headDataReader.MoveTo(assemblyTable.Offset);
-            headDataReader.Advance(4);
+            MoveTo(image.TableHeap.offsetInFile + assemblyTable.Offset);
+            Advance(4);
 
-            var major = (ushort)headDataReader.ReadInt16();
-            var minor = (ushort)headDataReader.ReadInt16();
-            var build = (ushort)headDataReader.ReadInt16();
-            var revision = (ushort)headDataReader.ReadInt16();
+            var major = ReadUInt16();
+            var minor = ReadUInt16();
+            var build = ReadUInt16();
+            var revision = ReadUInt16();
 
             return new Version(major, minor, build, revision);
         }
@@ -681,11 +670,13 @@ namespace PEFile
         public long Valid;
 
         public readonly TableInformation[] Tables = new TableInformation[TableCount];
-        public readonly byte[] data;
+        public readonly uint offsetInFile;
+        public readonly uint size;
 
-        public TableHeap(byte[] data)
+        public TableHeap(uint offsetInFile, uint size)
         {
-            this.data = data;
+            this.offsetInFile = offsetInFile;
+            this.size = size;
         }
 
         public bool HasTable(Table table)
