@@ -2,6 +2,8 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 
 namespace ConsoleApp1
 {
@@ -10,16 +12,45 @@ namespace ConsoleApp1
         static void Main(string[] args)
         {
             var f = @"G:\Code\vbfox-blog\paket.exe";
-            Version v = null;
+            OldBootstrapperCode(f);
+            UsingExtracedCecil(f);
+            
+            Console.ReadLine();
+        }
+
+        private static void OldBootstrapperCode(string f)
+        {
+            string v = null;
             var watch = Stopwatch.StartNew();
-            using (var s = File.OpenRead(f))
+            for (int i = 0; i < 1000; i++)
             {
-                v = AssemblyVersionReader.TryRead(s);
+                using (var s = File.OpenRead(f))
+                {
+                    var bytes = new MemoryStream();
+                    s.CopyTo(bytes);
+                    var attr = Assembly.Load(bytes.ToArray()).GetCustomAttributes(typeof(AssemblyInformationalVersionAttribute), false).Cast<AssemblyInformationalVersionAttribute>().FirstOrDefault();
+                    v = attr.InformationalVersion;
+                }
             }
             watch.Stop();
             Console.WriteLine("Version = {0}", v);
-            Console.WriteLine("Time = {0}ms", watch.ElapsedMilliseconds);
-            Console.ReadLine();
+            Console.WriteLine("Time LOAD = {0}ms", watch.ElapsedMilliseconds);
+        }
+
+        private static void UsingExtracedCecil(string f)
+        {
+            Version v = null;
+            var watch = Stopwatch.StartNew();
+            for (int i = 0; i < 1000; i++)
+            {
+                using (var s = File.OpenRead(f))
+                {
+                    v = AssemblyVersionReader.TryRead(s);
+                }
+            }
+            watch.Stop();
+            Console.WriteLine("Version = {0}", v);
+            Console.WriteLine("Time CECIL = {0}ms", watch.ElapsedMilliseconds);
         }
     }
 }
