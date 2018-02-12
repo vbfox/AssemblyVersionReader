@@ -27,6 +27,7 @@ namespace PEFile
         DataDirectory metadata;
 
         uint table_heap_offset;
+        private byte heapSizes;
 
         public ImageReader(Stream stream, string file_name)
             : base(stream)
@@ -171,7 +172,7 @@ namespace PEFile
             // CLIHeader			8
             cli = ReadDataDirectory();
 
-            if (cli.IsZero)
+            if (cli.VirtualAddress == 0 && cli.Size == 0)
                 throw new BadImageFormatException();
 
             // Reserved				8
@@ -325,12 +326,6 @@ namespace PEFile
                     image.TableHeap = new TableHeap(data);
                     table_heap_offset = offset;
                     break;
-                case "#Strings":
-                    image.StringHeap = new StringHeap(data);
-                    break;
-                case "#GUID":
-                    image.GuidHeap = new GuidHeap(data);
-                    break;
             }
         }
 
@@ -356,7 +351,7 @@ namespace PEFile
             Advance(6);
 
             // HeapSizes		1
-            var sizes = ReadByte();
+            heapSizes = ReadByte();
 
             // Reserved2		1
             Advance(1);
@@ -375,20 +370,12 @@ namespace PEFile
                 heap.Tables[i].Length = ReadUInt32();
             }
 
-            SetIndexSize(image.StringHeap, sizes, 0x1);
-            SetIndexSize(image.GuidHeap, sizes, 0x2);
-            SetIndexSize(image.BlobHeap, sizes, 0x4);
-
             ComputeTableInformations();
         }
-
-        static void SetIndexSize(Heap heap, uint sizes, byte flag)
-        {
-            if (heap == null)
-                return;
-
-            heap.IndexSize = (sizes & flag) > 0 ? 4 : 2;
-        }
+        
+        int StringHeapIndexSize => (heapSizes & 0x1) > 0 ? 4 : 2;
+        int GuidHeapIndexSize => (heapSizes & 0x2) > 0 ? 4 : 2;
+        int BlobHeapIndexSize => (heapSizes & 0x4) > 0 ? 4 : 2;
 
         int GetTableIndexSize(Table table)
         {
@@ -404,9 +391,9 @@ namespace PEFile
         {
             uint offset = (uint)BaseStream.Position - table_heap_offset - image.MetadataSection.PointerToRawData; // header
 
-            int stridx_size = image.StringHeap.IndexSize;
-            int guididx_size = image.GuidHeap != null ? image.GuidHeap.IndexSize : 2;
-            int blobidx_size = image.BlobHeap != null ? image.BlobHeap.IndexSize : 2;
+            int stridx_size = StringHeapIndexSize;
+            int guididx_size = GuidHeapIndexSize;
+            int blobidx_size = BlobHeapIndexSize;
 
             var heap = image.TableHeap;
             var tables = heap.Tables;
@@ -678,17 +665,6 @@ namespace PEFile
 
     public class BinaryStreamReader : BinaryReader
     {
-        public int Position
-        {
-            get { return (int)BaseStream.Position; }
-            set { BaseStream.Position = value; }
-        }
-
-        public int Length
-        {
-            get { return (int)BaseStream.Length; }
-        }
-
         public BinaryStreamReader(Stream stream)
             : base(stream)
         {
@@ -704,13 +680,6 @@ namespace PEFile
             BaseStream.Seek(position, SeekOrigin.Begin);
         }
 
-        public void Align(int align)
-        {
-            align--;
-            var position = Position;
-            Advance(((position + align) & ~align) - position);
-        }
-
         internal DataDirectory ReadDataDirectory()
         {
             return new DataDirectory(ReadUInt32(), ReadUInt32());
@@ -721,11 +690,6 @@ namespace PEFile
     {
         public readonly RVA VirtualAddress;
         public readonly uint Size;
-
-        public bool IsZero
-        {
-            get { return VirtualAddress == 0 && Size == 0; }
-        }
 
         public DataDirectory(RVA rva, uint size)
         {
@@ -830,26 +794,14 @@ namespace PEFile
         }
     }
 
-    abstract class Heap
-    {
-
-        public int IndexSize;
-
-        readonly internal byte[] data;
-
-        protected Heap(byte[] data)
-        {
-            this.data = data;
-        }
-    }
-
-    sealed class TableHeap : Heap
+    sealed class TableHeap
     {
         public const int TableCount = 58;
         public long Valid;
         public long Sorted;
 
         public readonly TableInformation[] Tables = new TableInformation[TableCount];
+        readonly internal byte[] data;
 
         public TableInformation this[Table table]
         {
@@ -857,129 +809,13 @@ namespace PEFile
         }
 
         public TableHeap(byte[] data)
-            : base(data)
         {
+            this.data = data;
         }
 
         public bool HasTable(Table table)
         {
             return (Valid & (1L << (int)table)) != 0;
-        }
-    }
-
-    sealed class GuidHeap : Heap
-    {
-
-        public GuidHeap(byte[] data)
-            : base(data)
-        {
-        }
-
-        public Guid Read(uint index)
-        {
-            const int guid_size = 16;
-
-            if (index == 0 || ((index - 1) + guid_size) > data.Length)
-                return new Guid();
-
-            var buffer = new byte[guid_size];
-
-            Buffer.BlockCopy(this.data, (int)((index - 1) * guid_size), buffer, 0, guid_size);
-
-            return new Guid(buffer);
-        }
-    }
-
-    class StringHeap : Heap
-    {
-
-        readonly Dictionary<uint, string> strings = new Dictionary<uint, string>();
-
-        public StringHeap(byte[] data)
-            : base(data)
-        {
-        }
-
-        public string Read(uint index)
-        {
-            if (index == 0)
-                return string.Empty;
-
-            string @string;
-            if (strings.TryGetValue(index, out @string))
-                return @string;
-
-            if (index > data.Length - 1)
-                return string.Empty;
-
-            @string = ReadStringAt(index);
-            if (@string.Length != 0)
-                strings.Add(index, @string);
-
-            return @string;
-        }
-
-        protected virtual string ReadStringAt(uint index)
-        {
-            int length = 0;
-            int start = (int)index;
-
-            for (int i = start; ; i++)
-            {
-                if (data[i] == 0)
-                    break;
-
-                length++;
-            }
-
-            return Encoding.UTF8.GetString(data, start, length);
-        }
-    }
-
-
-    sealed class BlobHeap : Heap
-    {
-
-        public BlobHeap(byte[] data)
-            : base(data)
-        {
-        }
-
-        public byte[] Read(uint index)
-        {
-            /*
-            if (index == 0 || index > this.data.Length - 1)
-                return Empty<byte>.Array;
-
-            int position = (int)index;
-            int length = (int)data.ReadCompressedUInt32(ref position);
-
-            if (length > data.Length - position)
-                return Empty<byte>.Array;
-
-            var buffer = new byte[length];
-
-            Buffer.BlockCopy(data, position, buffer, 0, length);
-
-            return buffer;*/
-            throw new NotImplementedException();
-        }
-
-        public void GetView(uint signature, out byte[] buffer, out int index, out int length)
-        {
-            /*
-            if (signature == 0 || signature > data.Length - 1)
-            {
-                buffer = null;
-                index = length = 0;
-                return;
-            }
-
-            buffer = data;
-
-            index = (int)signature;
-            length = (int)buffer.ReadCompressedUInt32(ref index);*/
-            throw new NotImplementedException();
         }
     }
 
@@ -997,13 +833,9 @@ namespace PEFile
         public uint EntryPointToken;
         public uint Timestamp;
 
-        public DataDirectory Debug;
         public DataDirectory Resources;
         public DataDirectory StrongName;
 
-        public StringHeap StringHeap;
-        public BlobHeap BlobHeap;
-        public GuidHeap GuidHeap;
         public TableHeap TableHeap;
 
         public uint ResolveVirtualAddress(RVA rva)
