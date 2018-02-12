@@ -14,7 +14,7 @@ using RVA = System.UInt32;
 
 namespace PEFile
 {
-    sealed class ImageReader : BinaryReader
+    sealed class AssemblyVersionReader : BinaryReader
     {
         readonly Image image;
 
@@ -24,7 +24,7 @@ namespace PEFile
         uint table_heap_offset;
         byte heapSizes;
 
-        ImageReader(Stream stream)
+        AssemblyVersionReader(Stream stream)
             : base(stream)
         {
             image = new Image();
@@ -535,11 +535,11 @@ namespace PEFile
             return new Version(major, minor, build, revision);
         }
 
-        public static Version ReadAssemblyVersion(Stream stream)
+        public static Version TryRead(Stream stream)
         {
             try
             {
-                var reader = new ImageReader(stream);
+                var reader = new AssemblyVersionReader(stream);
                 reader.ReadImage();
                 return reader.ReadAssemblyVersion();
             }

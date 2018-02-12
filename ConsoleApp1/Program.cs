@@ -11,7 +11,7 @@ namespace ConsoleApp1
             var f = @"G:\Code\vbfox-blog\paket.exe";
             using (var s = File.OpenRead(f))
             {
-                var v = ImageReader.ReadAssemblyVersion(s);
+                var v = AssemblyVersionReader.TryRead(s);
                 Console.WriteLine("Version = {0}", v);
             }
             Console.ReadLine();
