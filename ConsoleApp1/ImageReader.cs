@@ -16,19 +16,18 @@ namespace PEFile
 {
     sealed class ImageReader : BinaryStreamReader
     {
-        public readonly Image image;
+        readonly Image image;
 
         DataDirectory cli;
         DataDirectory metadata;
 
         uint table_heap_offset;
-        private byte heapSizes;
+        byte heapSizes;
 
-        public ImageReader(Stream stream, string file_name)
+        public ImageReader(Stream stream)
             : base(stream)
         {
             image = new Image();
-            image.Stream = stream;
         }
 
         void MoveTo(DataDirectory directory)
@@ -604,34 +603,38 @@ namespace PEFile
             }
         }
 
-        public static Version ReadAssemblyVersion(Stream stream, string file_name)
+        private Version ReadAssemblyVersion()
+        {
+            if (!image.TableHeap.HasTable(Table.Assembly))
+            {
+                return null;
+            }
+
+            var assemblyTable = image.TableHeap.Tables[(int)Table.Assembly];
+
+            var headDataReader = new BinaryStreamReader(new MemoryStream(image.TableHeap.data));
+            headDataReader.MoveTo(assemblyTable.Offset);
+            headDataReader.Advance(4);
+
+            var major = (ushort)headDataReader.ReadInt16();
+            var minor = (ushort)headDataReader.ReadInt16();
+            var build = (ushort)headDataReader.ReadInt16();
+            var revision = (ushort)headDataReader.ReadInt16();
+
+            return new Version(major, minor, build, revision);
+        }
+
+        public static Version ReadAssemblyVersion(Stream stream)
         {
             try
             {
-                var reader = new ImageReader(stream, file_name);
+                var reader = new ImageReader(stream);
                 reader.ReadImage();
-
-                if (!reader.image.TableHeap.HasTable(Table.Assembly))
-                {
-                    return null;
-                }
-
-                var assemblyTable = reader.image.TableHeap.Tables[(int)Table.Assembly];
-
-                var headDataReader = new BinaryStreamReader(new MemoryStream(reader.image.TableHeap.data));
-                headDataReader.MoveTo(assemblyTable.Offset);
-                headDataReader.Advance(4);
-
-                var major = (ushort)headDataReader.ReadInt16();
-                var minor = (ushort)headDataReader.ReadInt16();
-                var build = (ushort)headDataReader.ReadInt16();
-                var revision = (ushort)headDataReader.ReadInt16();
-
-                return new Version(major, minor, build, revision);
+                return reader.ReadAssemblyVersion();
             }
-            catch (EndOfStreamException e)
+            catch (Exception)
             {
-                throw new BadImageFormatException(file_name, e);
+                return null;
             }
         }
     }
@@ -782,8 +785,6 @@ namespace PEFile
 
     sealed class Image
     {
-        public Stream Stream;
-
         public Section[] Sections;
 
         public Section MetadataSection;
