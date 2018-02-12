@@ -1,5 +1,6 @@
 ﻿using PEFile;
 using System;
+using System.Diagnostics;
 using System.IO;
 
 namespace ConsoleApp1
@@ -9,11 +10,15 @@ namespace ConsoleApp1
         static void Main(string[] args)
         {
             var f = @"G:\Code\vbfox-blog\paket.exe";
+            Version v = null;
+            var watch = Stopwatch.StartNew();
             using (var s = File.OpenRead(f))
             {
-                var v = AssemblyVersionReader.TryRead(s);
-                Console.WriteLine("Version = {0}", v);
+                v = AssemblyVersionReader.TryRead(s);
             }
+            watch.Stop();
+            Console.WriteLine("Version = {0}", v);
+            Console.WriteLine("Time = {0}ms", watch.ElapsedMilliseconds);
             Console.ReadLine();
         }
     }
