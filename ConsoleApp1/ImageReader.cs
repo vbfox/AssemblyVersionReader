@@ -191,18 +191,16 @@ namespace PEFile
 
             for (int i = 0; i < count; i++)
             {
-                var section = new Section();
-
                 // Name
                 // VirtualSize		4
                 Advance(12);
 
                 // VirtualAddress	4
-                section.VirtualAddress = ReadUInt32();
+                var virtualAddress = ReadUInt32();
                 // SizeOfRawData	4
-                section.SizeOfRawData = ReadUInt32();
+                var sizeOfRawData = ReadUInt32();
                 // PointerToRawData	4
-                section.PointerToRawData = ReadUInt32();
+                var pointerToRawData = ReadUInt32();
 
                 // PointerToRelocations		4
                 // PointerToLineNumbers		4
@@ -211,7 +209,7 @@ namespace PEFile
                 // Characteristics			4
                 Advance(16);
 
-                sections[i] = section;
+                sections[i] = new Section(virtualAddress, sizeOfRawData, pointerToRawData);
             }
 
             image.Sections = sections;
@@ -264,10 +262,10 @@ namespace PEFile
             if (section == null)
                 throw new BadImageFormatException();
 
-            image.MetadataSection = section;
+            image.MetadataSection = section.Value;
 
             for (int i = 0; i < streams; i++)
-                ReadMetadataStream(section);
+                ReadMetadataStream(section.Value);
 
             if (image.TableHeap != null)
                 ReadTableHeap();
@@ -589,11 +587,18 @@ namespace PEFile
         }
     }
 
-    sealed class Section
+    struct Section
     {
-        public RVA VirtualAddress;
-        public uint SizeOfRawData;
-        public uint PointerToRawData;
+        public readonly RVA VirtualAddress;
+        public readonly uint SizeOfRawData;
+        public readonly uint PointerToRawData;
+
+        public Section(uint virtualAddress, uint sizeOfRawData, uint pointerToRawData)
+        {
+            VirtualAddress = virtualAddress;
+            SizeOfRawData = sizeOfRawData;
+            PointerToRawData = pointerToRawData;
+        }
     }
 
     enum CodedIndex
@@ -703,10 +708,10 @@ namespace PEFile
             if (section == null)
                 throw new ArgumentOutOfRangeException();
 
-            return rva + section.PointerToRawData - section.VirtualAddress;
+            return rva + section.Value.PointerToRawData - section.Value.VirtualAddress;
         }
 
-        public Section GetSectionAtVirtualAddress(RVA rva)
+        public Section? GetSectionAtVirtualAddress(RVA rva)
         {
             var sections = this.Sections;
             for (int i = 0; i < sections.Length; i++)
