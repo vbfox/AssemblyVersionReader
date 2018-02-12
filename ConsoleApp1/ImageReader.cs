@@ -66,17 +66,16 @@ namespace PEFile
             // - PEFileHeader
 
             // Machine				2
-            image.Architecture = ReadArchitecture();
+            Advance(2);
 
             // NumberOfSections		2
             ushort sections = ReadUInt16();
 
             // TimeDateStamp		4
-            image.Timestamp = ReadUInt32();
             // PointerToSymbolTable	4
             // NumberOfSymbols		4
             // OptionalHeaderSize	2
-            Advance(10);
+            Advance(14);
 
             // Characteristics		2
             ushort characteristics = ReadUInt16();
@@ -223,7 +222,7 @@ namespace PEFile
                 var section = new Section();
 
                 // Name
-                section.Name = ReadZeroTerminatedString(8);
+                ReadZeroTerminatedString(8);
 
                 // VirtualSize		4
                 Advance(4);
@@ -262,14 +261,11 @@ namespace PEFile
             // Metadata					8
             metadata = ReadDataDirectory();
             // Flags					4
-            //image.Attributes = (ModuleAttributes)
-            ReadUInt32();
             // EntryPointToken			4
-            image.EntryPointToken = ReadUInt32();
+            // image.EntryPointToken =
+            // ReadUInt32();
             // Resources				8
-            image.Resources = ReadDataDirectory();
             // StrongNameSignature		8
-            image.StrongName = ReadDataDirectory();
             // CodeManagerTable			8
             // VTableFixups				8
             // ExportAddressTableJumps	8
@@ -288,7 +284,7 @@ namespace PEFile
             // Reserved				4
             Advance(8);
 
-            image.RuntimeVersion = ReadZeroTerminatedString(ReadInt32());
+            ReadZeroTerminatedString(ReadInt32());
 
             // Flags		2
             Advance(2);
@@ -360,7 +356,7 @@ namespace PEFile
             heap.Valid = ReadInt64();
 
             // Sorted			8
-            heap.Sorted = ReadInt64();
+            Advance(8);
 
             for (int i = 0; i < TableHeap.TableCount; i++)
             {
@@ -700,7 +696,6 @@ namespace PEFile
 
     sealed class Section
     {
-        public string Name;
         public RVA VirtualAddress;
         public uint SizeOfRawData;
         public uint PointerToRawData;
@@ -798,7 +793,6 @@ namespace PEFile
     {
         public const int TableCount = 58;
         public long Valid;
-        public long Sorted;
 
         public readonly TableInformation[] Tables = new TableInformation[TableCount];
         readonly internal byte[] data;
@@ -823,18 +817,9 @@ namespace PEFile
     {
         public Stream Stream;
 
-        public string RuntimeVersion;
-        public TargetArchitecture Architecture;
-
         public Section[] Sections;
 
         public Section MetadataSection;
-
-        public uint EntryPointToken;
-        public uint Timestamp;
-
-        public DataDirectory Resources;
-        public DataDirectory StrongName;
 
         public TableHeap TableHeap;
 

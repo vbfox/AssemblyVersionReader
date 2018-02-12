@@ -23,7 +23,7 @@ namespace ConsoleApp1
 
             var headDataReader = new BinaryStreamReader(new MemoryStream(x.TableHeap.data));
             headDataReader.MoveTo(assemblyTable.Offset);
-            headDataReader.ReadInt32();
+            headDataReader.Advance(4);
             var aa = headDataReader.ReadInt16();
             var bb = headDataReader.ReadInt16();
             var cc = headDataReader.ReadInt16();
