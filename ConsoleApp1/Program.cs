@@ -19,7 +19,7 @@ namespace ConsoleApp1
             var x = reader.image;
 
             var hasAssembly = x.TableHeap.HasTable(Table.Assembly);
-            var assemblyTable = x.TableHeap[Table.Assembly];
+            var assemblyTable = x.TableHeap.Tables[(int)Table.Assembly];
 
             var headDataReader = new BinaryStreamReader(new MemoryStream(x.TableHeap.data));
             headDataReader.MoveTo(assemblyTable.Offset);

@@ -87,11 +87,6 @@ namespace PEFile
             ReadMetadata();
         }
 
-        TargetArchitecture ReadArchitecture()
-        {
-            return (TargetArchitecture)ReadUInt16();
-        }
-
         void ReadOptionalHeaders(out ushort subsystem, out ushort dll_characteristics, out ushort linker)
         {
             // - PEOptionalHeader
@@ -196,23 +191,6 @@ namespace PEFile
             return new string(buffer, 0, read);
         }
 
-        string ReadZeroTerminatedString(int length)
-        {
-            int read = 0;
-            var buffer = new char[length];
-            var bytes = ReadBytes(length);
-            while (read < length)
-            {
-                var current = bytes[read];
-                if (current == 0)
-                    break;
-
-                buffer[read++] = (char)current;
-            }
-
-            return new string(buffer, 0, read);
-        }
-
         void ReadSections(ushort count)
         {
             var sections = new Section[count];
@@ -222,10 +200,8 @@ namespace PEFile
                 var section = new Section();
 
                 // Name
-                ReadZeroTerminatedString(8);
-
                 // VirtualSize		4
-                Advance(4);
+                Advance(12);
 
                 // VirtualAddress	4
                 section.VirtualAddress = ReadUInt32();
@@ -260,10 +236,9 @@ namespace PEFile
 
             // Metadata					8
             metadata = ReadDataDirectory();
+
             // Flags					4
             // EntryPointToken			4
-            // image.EntryPointToken =
-            // ReadUInt32();
             // Resources				8
             // StrongNameSignature		8
             // CodeManagerTable			8
@@ -284,7 +259,7 @@ namespace PEFile
             // Reserved				4
             Advance(8);
 
-            ReadZeroTerminatedString(ReadInt32());
+            Advance(ReadInt32());
 
             // Flags		2
             Advance(2);
@@ -373,16 +348,6 @@ namespace PEFile
         int GuidHeapIndexSize => (heapSizes & 0x2) > 0 ? 4 : 2;
         int BlobHeapIndexSize => (heapSizes & 0x4) > 0 ? 4 : 2;
 
-        int GetTableIndexSize(Table table)
-        {
-            return image.GetTableIndexSize(table);
-        }
-
-        int GetCodedIndexSize(CodedIndex index)
-        {
-            return image.GetCodedIndexSize(index);
-        }
-
         void ComputeTableInformations()
         {
             uint offset = (uint)BaseStream.Position - table_heap_offset - image.MetadataSection.PointerToRawData; // header
@@ -409,18 +374,18 @@ namespace PEFile
                             + (guididx_size * 3);   // Mvid, EncId, EncBaseId
                         break;
                     case Table.TypeRef:
-                        size = GetCodedIndexSize(CodedIndex.ResolutionScope)    // ResolutionScope
+                        size = image.GetCodedIndexSize(CodedIndex.ResolutionScope)    // ResolutionScope
                             + (stridx_size * 2);    // Name, Namespace
                         break;
                     case Table.TypeDef:
                         size = 4    // Flags
                             + (stridx_size * 2) // Name, Namespace
-                            + GetCodedIndexSize(CodedIndex.TypeDefOrRef)    // BaseType
-                            + GetTableIndexSize(Table.Field)    // FieldList
-                            + GetTableIndexSize(Table.Method);  // MethodList
+                            + image.GetCodedIndexSize(CodedIndex.TypeDefOrRef)    // BaseType
+                            + image.GetTableIndexSize(Table.Field)    // FieldList
+                            + image.GetTableIndexSize(Table.Method);  // MethodList
                         break;
                     case Table.FieldPtr:
-                        size = GetTableIndexSize(Table.Field);  // Field
+                        size = image.GetTableIndexSize(Table.Field);  // Field
                         break;
                     case Table.Field:
                         size = 2    // Flags
@@ -428,78 +393,78 @@ namespace PEFile
                             + blobidx_size; // Signature
                         break;
                     case Table.MethodPtr:
-                        size = GetTableIndexSize(Table.Method); // Method
+                        size = image.GetTableIndexSize(Table.Method); // Method
                         break;
                     case Table.Method:
                         size = 8    // Rva 4, ImplFlags 2, Flags 2
                             + stridx_size   // Name
                             + blobidx_size  // Signature
-                            + GetTableIndexSize(Table.Param); // ParamList
+                            + image.GetTableIndexSize(Table.Param); // ParamList
                         break;
                     case Table.ParamPtr:
-                        size = GetTableIndexSize(Table.Param); // Param
+                        size = image.GetTableIndexSize(Table.Param); // Param
                         break;
                     case Table.Param:
                         size = 4    // Flags 2, Sequence 2
                             + stridx_size;  // Name
                         break;
                     case Table.InterfaceImpl:
-                        size = GetTableIndexSize(Table.TypeDef) // Class
-                            + GetCodedIndexSize(CodedIndex.TypeDefOrRef);   // Interface
+                        size = image.GetTableIndexSize(Table.TypeDef) // Class
+                            + image.GetCodedIndexSize(CodedIndex.TypeDefOrRef);   // Interface
                         break;
                     case Table.MemberRef:
-                        size = GetCodedIndexSize(CodedIndex.MemberRefParent)    // Class
+                        size = image.GetCodedIndexSize(CodedIndex.MemberRefParent)    // Class
                             + stridx_size   // Name
                             + blobidx_size; // Signature
                         break;
                     case Table.Constant:
                         size = 2    // Type
-                            + GetCodedIndexSize(CodedIndex.HasConstant) // Parent
+                            + image.GetCodedIndexSize(CodedIndex.HasConstant) // Parent
                             + blobidx_size; // Value
                         break;
                     case Table.CustomAttribute:
-                        size = GetCodedIndexSize(CodedIndex.HasCustomAttribute) // Parent
-                            + GetCodedIndexSize(CodedIndex.CustomAttributeType) // Type
+                        size = image.GetCodedIndexSize(CodedIndex.HasCustomAttribute) // Parent
+                            + image.GetCodedIndexSize(CodedIndex.CustomAttributeType) // Type
                             + blobidx_size; // Value
                         break;
                     case Table.FieldMarshal:
-                        size = GetCodedIndexSize(CodedIndex.HasFieldMarshal)    // Parent
+                        size = image.GetCodedIndexSize(CodedIndex.HasFieldMarshal)    // Parent
                             + blobidx_size; // NativeType
                         break;
                     case Table.DeclSecurity:
                         size = 2    // Action
-                            + GetCodedIndexSize(CodedIndex.HasDeclSecurity) // Parent
+                            + image.GetCodedIndexSize(CodedIndex.HasDeclSecurity) // Parent
                             + blobidx_size; // PermissionSet
                         break;
                     case Table.ClassLayout:
                         size = 6    // PackingSize 2, ClassSize 4
-                            + GetTableIndexSize(Table.TypeDef); // Parent
+                            + image.GetTableIndexSize(Table.TypeDef); // Parent
                         break;
                     case Table.FieldLayout:
                         size = 4    // Offset
-                            + GetTableIndexSize(Table.Field);   // Field
+                            + image.GetTableIndexSize(Table.Field);   // Field
                         break;
                     case Table.StandAloneSig:
                         size = blobidx_size;    // Signature
                         break;
                     case Table.EventMap:
-                        size = GetTableIndexSize(Table.TypeDef) // Parent
-                            + GetTableIndexSize(Table.Event);   // EventList
+                        size = image.GetTableIndexSize(Table.TypeDef) // Parent
+                            + image.GetTableIndexSize(Table.Event);   // EventList
                         break;
                     case Table.EventPtr:
-                        size = GetTableIndexSize(Table.Event);  // Event
+                        size = image.GetTableIndexSize(Table.Event);  // Event
                         break;
                     case Table.Event:
                         size = 2    // Flags
                             + stridx_size // Name
-                            + GetCodedIndexSize(CodedIndex.TypeDefOrRef);   // EventType
+                            + image.GetCodedIndexSize(CodedIndex.TypeDefOrRef);   // EventType
                         break;
                     case Table.PropertyMap:
-                        size = GetTableIndexSize(Table.TypeDef) // Parent
-                            + GetTableIndexSize(Table.Property);    // PropertyList
+                        size = image.GetTableIndexSize(Table.TypeDef) // Parent
+                            + image.GetTableIndexSize(Table.Property);    // PropertyList
                         break;
                     case Table.PropertyPtr:
-                        size = GetTableIndexSize(Table.Property);   // Property
+                        size = image.GetTableIndexSize(Table.Property);   // Property
                         break;
                     case Table.Property:
                         size = 2    // Flags
@@ -508,13 +473,13 @@ namespace PEFile
                         break;
                     case Table.MethodSemantics:
                         size = 2    // Semantics
-                            + GetTableIndexSize(Table.Method)   // Method
-                            + GetCodedIndexSize(CodedIndex.HasSemantics);   // Association
+                            + image.GetTableIndexSize(Table.Method)   // Method
+                            + image.GetCodedIndexSize(CodedIndex.HasSemantics);   // Association
                         break;
                     case Table.MethodImpl:
-                        size = GetTableIndexSize(Table.TypeDef) // Class
-                            + GetCodedIndexSize(CodedIndex.MethodDefOrRef)  // MethodBody
-                            + GetCodedIndexSize(CodedIndex.MethodDefOrRef); // MethodDeclaration
+                        size = image.GetTableIndexSize(Table.TypeDef) // Class
+                            + image.GetCodedIndexSize(CodedIndex.MethodDefOrRef)  // MethodBody
+                            + image.GetCodedIndexSize(CodedIndex.MethodDefOrRef); // MethodDeclaration
                         break;
                     case Table.ModuleRef:
                         size = stridx_size; // Name
@@ -524,13 +489,13 @@ namespace PEFile
                         break;
                     case Table.ImplMap:
                         size = 2    // MappingFlags
-                            + GetCodedIndexSize(CodedIndex.MemberForwarded) // MemberForwarded
+                            + image.GetCodedIndexSize(CodedIndex.MemberForwarded) // MemberForwarded
                             + stridx_size   // ImportName
-                            + GetTableIndexSize(Table.ModuleRef);   // ImportScope
+                            + image.GetTableIndexSize(Table.ModuleRef);   // ImportScope
                         break;
                     case Table.FieldRVA:
                         size = 4    // RVA
-                            + GetTableIndexSize(Table.Field);   // Field
+                            + image.GetTableIndexSize(Table.Field);   // Field
                         break;
                     case Table.EncLog:
                         size = 8;
@@ -556,11 +521,11 @@ namespace PEFile
                         break;
                     case Table.AssemblyRefProcessor:
                         size = 4    // Processor
-                            + GetTableIndexSize(Table.AssemblyRef); // AssemblyRef
+                            + image.GetTableIndexSize(Table.AssemblyRef); // AssemblyRef
                         break;
                     case Table.AssemblyRefOS:
                         size = 12   // Platform 4, Version 2 * 4
-                            + GetTableIndexSize(Table.AssemblyRef); // AssemblyRef
+                            + image.GetTableIndexSize(Table.AssemblyRef); // AssemblyRef
                         break;
                     case Table.File:
                         size = 4    // Flags
@@ -570,29 +535,29 @@ namespace PEFile
                     case Table.ExportedType:
                         size = 8    // Flags 4, TypeDefId 4
                             + (stridx_size * 2) // Name, Namespace
-                            + GetCodedIndexSize(CodedIndex.Implementation); // Implementation
+                            + image.GetCodedIndexSize(CodedIndex.Implementation); // Implementation
                         break;
                     case Table.ManifestResource:
                         size = 8    // Offset, Flags
                             + stridx_size   // Name
-                            + GetCodedIndexSize(CodedIndex.Implementation); // Implementation
+                            + image.GetCodedIndexSize(CodedIndex.Implementation); // Implementation
                         break;
                     case Table.NestedClass:
-                        size = GetTableIndexSize(Table.TypeDef) // NestedClass
-                            + GetTableIndexSize(Table.TypeDef); // EnclosingClass
+                        size = image.GetTableIndexSize(Table.TypeDef) // NestedClass
+                            + image.GetTableIndexSize(Table.TypeDef); // EnclosingClass
                         break;
                     case Table.GenericParam:
                         size = 4    // Number, Flags
-                            + GetCodedIndexSize(CodedIndex.TypeOrMethodDef) // Owner
+                            + image.GetCodedIndexSize(CodedIndex.TypeOrMethodDef) // Owner
                             + stridx_size;  // Name
                         break;
                     case Table.MethodSpec:
-                        size = GetCodedIndexSize(CodedIndex.MethodDefOrRef) // Method
+                        size = image.GetCodedIndexSize(CodedIndex.MethodDefOrRef) // Method
                             + blobidx_size; // Instantiation
                         break;
                     case Table.GenericParamConstraint:
-                        size = GetTableIndexSize(Table.GenericParam)    // Owner
-                            + GetCodedIndexSize(CodedIndex.TypeDefOrRef);   // Constraint
+                        size = image.GetTableIndexSize(Table.GenericParam)    // Owner
+                            + image.GetCodedIndexSize(CodedIndex.TypeDefOrRef);   // Constraint
                         break;
                     case Table.Document:
                         size = blobidx_size // Name
@@ -601,14 +566,14 @@ namespace PEFile
                             + guididx_size; // Language
                         break;
                     case Table.MethodDebugInformation:
-                        size = GetTableIndexSize(Table.Document)  // Document
+                        size = image.GetTableIndexSize(Table.Document)  // Document
                             + blobidx_size; // SequencePoints
                         break;
                     case Table.LocalScope:
-                        size = GetTableIndexSize(Table.Method)  // Method
-                            + GetTableIndexSize(Table.ImportScope)  // ImportScope
-                            + GetTableIndexSize(Table.LocalVariable)    // VariableList
-                            + GetTableIndexSize(Table.LocalConstant)    // ConstantList
+                        size = image.GetTableIndexSize(Table.Method)  // Method
+                            + image.GetTableIndexSize(Table.ImportScope)  // ImportScope
+                            + image.GetTableIndexSize(Table.LocalVariable)    // VariableList
+                            + image.GetTableIndexSize(Table.LocalConstant)    // ConstantList
                             + 4 * 2;    // StartOffset, Length
                         break;
                     case Table.LocalVariable:
@@ -621,15 +586,15 @@ namespace PEFile
                             + blobidx_size; // Signature
                         break;
                     case Table.ImportScope:
-                        size = GetTableIndexSize(Table.ImportScope) // Parent
+                        size = image.GetTableIndexSize(Table.ImportScope) // Parent
                             + blobidx_size;
                         break;
                     case Table.StateMachineMethod:
-                        size = GetTableIndexSize(Table.Method) // MoveNextMethod
-                            + GetTableIndexSize(Table.Method);  // KickOffMethod
+                        size = image.GetTableIndexSize(Table.Method) // MoveNextMethod
+                            + image.GetTableIndexSize(Table.Method);  // KickOffMethod
                         break;
                     case Table.CustomDebugInformation:
-                        size = GetCodedIndexSize(CodedIndex.HasCustomDebugInformation) // Parent
+                        size = image.GetCodedIndexSize(CodedIndex.HasCustomDebugInformation) // Parent
                             + guididx_size  // Kind
                             + blobidx_size; // Value
                         break;
@@ -782,11 +747,6 @@ namespace PEFile
         public uint Offset;
         public uint Length;
         public uint RowSize;
-
-        public bool IsLarge
-        {
-            get { return Length > ushort.MaxValue; }
-        }
     }
 
     sealed class TableHeap
@@ -795,12 +755,7 @@ namespace PEFile
         public long Valid;
 
         public readonly TableInformation[] Tables = new TableInformation[TableCount];
-        readonly internal byte[] data;
-
-        public TableInformation this[Table table]
-        {
-            get { return Tables[(int)table]; }
-        }
+        public readonly byte[] data;
 
         public TableHeap(byte[] data)
         {
@@ -852,7 +807,7 @@ namespace PEFile
 
         public int GetTableLength(Table table)
         {
-            return (int)TableHeap[table].Length;
+            return (int)TableHeap.Tables[(int)table].Length;
         }
 
         public int GetTableIndexSize(Table table)
