@@ -54,7 +54,7 @@ namespace ConsoleApp1
             {
 
                     bytes.Position = 0;
-                    v = AssemblyVersionReader.TryRead(bytes);
+                    v = AssemblyVersionReader.TryReadAssemblyInformationalVersion(bytes);
                 }
             }
             watch.Stop();

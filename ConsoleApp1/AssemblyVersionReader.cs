@@ -280,10 +280,14 @@ namespace PEFile
                     table_heap_offset = offset;
                     break;
                 case "#Strings":
-                    image.StringHeap = new StringHeap(offsetInFile, size);
+                    image.StringHeap = new StringHeap();
+                    image.StringHeap.OffsetInFile = offsetInFile;
+                    image.StringHeap.Size = size;
                     break;
                 case "#Blob":
-                    image.BlobHeap = new BlobHeap(offsetInFile, size);
+                    image.BlobHeap = new BlobHeap();
+                    image.BlobHeap.OffsetInFile = offsetInFile;
+                    image.BlobHeap.Size = size;
                     break;
             }
         }
@@ -528,7 +532,7 @@ namespace PEFile
             return value;
         }
 
-        private string ReadAssemblyVersion()
+        private string ReadAssemblyInformationalVersion()
         {
             if (!image.TableHeap.HasTable(Table.Assembly))
             {
@@ -540,18 +544,17 @@ namespace PEFile
                 var typeRefTable = image.TableHeap.Tables[(int)Table.TypeRef];
                 for (uint i = 1; i <= typeRefTable.Length; i++)
                 {
-                    var index = (typeRefTable.RowSize * (i-1));
+                    var index = (typeRefTable.RowSize * (i - 1));
                     MoveTo(image.TableHeap.offsetInFile + typeRefTable.Offset + index);
                     Advance(image.GetCodedIndexSize(CodedIndex.ResolutionScope));
                     var nameIndex = StringIndexSize == 2 ? ReadUInt16() : ReadUInt32();
                     var nsIndex = StringIndexSize == 2 ? ReadUInt16() : ReadUInt32();
                     var name = image.StringHeap.Read(BaseStream, nameIndex);
 
-                    //Console.WriteLine($"[{i}] {ns}.{name}");
                     if (name == "AssemblyInformationalVersionAttribute" && image.StringHeap.Read(BaseStream, nsIndex) == "System.Reflection")
                     {
                         aivaIndex = i;
-                        
+
                         break;
                     }
                 }
@@ -566,21 +569,14 @@ namespace PEFile
                 var memberRefTable = image.TableHeap.Tables[(int)Table.MemberRef];
                 for (uint i = 1; i <= memberRefTable.Length; i++)
                 {
-                    /*
-                        size = image.GetCodedIndexSize(CodedIndex.MemberRefParent)    // Class
-                            + stridx_size   // Name
-                            + blobidx_size; // Signature
-                     */
-                    var index = (memberRefTable.RowSize * (i-1));
+                    var index = (memberRefTable.RowSize * (i - 1));
                     MoveTo(image.TableHeap.offsetInFile + memberRefTable.Offset + index);
                     var classIndex = ReadIndex(CodedIndex.MemberRefParent);
-                    var name = ReadIndexedString();
 
-                    //Console.WriteLine($"[{i}] Class={classIndex >> 3} (Tag={classIndex & 0x07}) {name}");
-                    if (classIndex == aivaIndexMemberRefParent && name == ".ctor")
+                    if (classIndex == aivaIndexMemberRefParent && ReadIndexedString() == ".ctor")
                     {
                         aivaCtorIndex = i;
-                        
+
                         break;
                     }
                 }
@@ -593,26 +589,20 @@ namespace PEFile
             var customAttrTable = image.TableHeap.Tables[(int)Table.CustomAttribute];
 
             uint aivaBlob = 0;
-
-            for (uint i = 1; i <= customAttrTable.Length; i++)
             {
-                /*                        size = image.GetCodedIndexSize(CodedIndex.HasCustomAttribute) // Parent
-                            + image.GetCodedIndexSize(CodedIndex.CustomAttributeType) // Type
-                            + blobidx_size; // Value
-                 */
-                MoveTo(image.TableHeap.offsetInFile + customAttrTable.Offset + (customAttrTable.RowSize * (i-1)));
-                var target = ReadIndex(CodedIndex.HasCustomAttribute);
-                var typeIndex = ReadIndex(CodedIndex.CustomAttributeType);
-                var blobIndex = BlobIndexSize == 2 ? ReadUInt16() : ReadUInt32();
-
-                if (typeIndex == aivaCtorIndexCustomAttributeType)
+                for (uint i = 1; i <= customAttrTable.Length; i++)
                 {
-                    // Console.WriteLine($"[{i}] {target} Type={typeIndex >> 3} (Tag={typeIndex & 0x07}) {blobIndex}");
-                    aivaBlob = blobIndex;
-                    break;
+                    MoveTo(image.TableHeap.offsetInFile + customAttrTable.Offset + (customAttrTable.RowSize * (i - 1)));
+                    var target = ReadIndex(CodedIndex.HasCustomAttribute);
+                    var typeIndex = ReadIndex(CodedIndex.CustomAttributeType);
+
+                    if (typeIndex == aivaCtorIndexCustomAttributeType)
+                    {
+                        aivaBlob = BlobIndexSize == 2 ? ReadUInt16() : ReadUInt32();
+                        break;
+                    }
                 }
             }
-
             if (aivaBlob == 0) return null;
 
             // Custom attribute blob
@@ -644,18 +634,18 @@ namespace PEFile
             return Encoding.UTF8.GetString(buffer, 0, length);
         }
 
-        public static string TryRead(Stream stream)
+        public static string TryReadAssemblyInformationalVersion(Stream stream)
         {
-            /*try
-            {*/
+            try
+            {
                 var reader = new AssemblyVersionReader(stream);
                 reader.ReadImage();
-                return reader.ReadAssemblyVersion();
-            /*}
+                return reader.ReadAssemblyInformationalVersion();
+            }
             catch (Exception)
             {
                 return null;
-            }*/
+            }
         }
 
         struct DataDirectory
@@ -665,8 +655,8 @@ namespace PEFile
 
             public DataDirectory(RVA rva, uint size)
             {
-                this.VirtualAddress = rva;
-                this.Size = size;
+                VirtualAddress = rva;
+                Size = size;
             }
         }
 
@@ -779,7 +769,6 @@ namespace PEFile
             }
         }
 
-
         struct TableInformation
         {
             public uint RowSize;
@@ -797,10 +786,11 @@ namespace PEFile
 
             public TableHeap(uint offsetInFile, uint size)
             {
-                Valid = 0;
-                Tables = new TableInformation[Mixin.TableCount];
                 this.offsetInFile = offsetInFile;
                 this.size = size;
+
+                Valid = 0;
+                Tables = new TableInformation[Mixin.TableCount];
             }
 
             public bool HasTable(Table table)
@@ -809,32 +799,21 @@ namespace PEFile
             }
         }
 
-        class StringHeap
+        struct StringHeap
         {
-            public readonly uint offsetInFile;
-            public readonly uint size;
-
-            public StringHeap(uint offsetInFile, uint size)
-            {
-                this.offsetInFile = offsetInFile;
-                this.size = size;
-            }
+            public uint OffsetInFile;
+            public uint Size;
 
             public string Read(Stream stream, uint index)
             {
                 if (index == 0)
                     return string.Empty;
 
-                if (index > size - 1)
+                if (index > Size - 1)
                     return string.Empty;
 
-                return ReadStringAt(stream, index);
-            }
-
-            protected virtual string ReadStringAt(Stream stream, uint index)
-            {
                 var buffer = new MemoryStream();
-                stream.Position = offsetInFile + index;
+                stream.Position = OffsetInFile + index;
 
                 while (true)
                 {
@@ -851,21 +830,15 @@ namespace PEFile
 
         struct BlobHeap
         {
-            public readonly uint offsetInFile;
-            public readonly uint size;
-
-            public BlobHeap(uint offsetInFile, uint size)
-            {
-                this.offsetInFile = offsetInFile;
-                this.size = size;
-            }
+            public uint OffsetInFile;
+            public uint Size;
 
             public int MoveTo(Stream stream, uint index)
             {
-                if (index == 0 || index > this.size - 1)
+                if (index == 0 || index > Size - 1)
                     return 0;
 
-                stream.Position = offsetInFile + index;
+                stream.Position = OffsetInFile + index;
                 return (int)Mixin.ReadCompressedUInt32(stream);
             }
         }
@@ -891,7 +864,7 @@ namespace PEFile
 
             public Section? GetSectionAtVirtualAddress(RVA rva)
             {
-                var sections = this.Sections;
+                var sections = Sections;
                 for (int i = 0; i < sections.Length; i++)
                 {
                     var section = sections[i];
