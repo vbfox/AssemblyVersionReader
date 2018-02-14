@@ -12,7 +12,7 @@ namespace ConsoleApp1
         static void Main(string[] args)
         {
             var f = @"G:\Code\vbfox-blog\paket.exe";
-            OldBootstrapperCode(f);
+            //OldBootstrapperCode(f);
             UsingExtracedCecil(f);
             
             Console.ReadLine();
@@ -41,7 +41,7 @@ namespace ConsoleApp1
         {
             Version v = null;
             var watch = Stopwatch.StartNew();
-            for (int i = 0; i < 1000; i++)
+            for (int i = 0; i < 1; i++)
             {
                 using (var s = File.OpenRead(f))
                 {

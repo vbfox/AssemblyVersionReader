@@ -10,6 +10,8 @@
 
 using System;
 using System.IO;
+using System.Linq;
+using System.Text;
 using RVA = System.UInt32;
 
 namespace PEFile
@@ -277,6 +279,12 @@ namespace PEFile
                     image.TableHeap = new TableHeap(offsetInFile, size);
                     table_heap_offset = offset;
                     break;
+                case "#Strings":
+                    image.StringHeap = new StringHeap(offsetInFile, size);
+                    break;
+                case "#Blob":
+                    image.BlobHeap = new BlobHeap(offsetInFile, size);
+                    break;
             }
         }
 
@@ -301,7 +309,7 @@ namespace PEFile
             // Sorted			8
             Advance(8);
 
-            for (int i = 0; i < TableHeap.TableCount; i++)
+            for (int i = 0; i < Mixin.TableCount; i++)
             {
                 if (!image.TableHeap.HasTable((Table)i))
                     continue;
@@ -311,19 +319,22 @@ namespace PEFile
 
             ComputeTableInformations();
         }
-        
+
+        int StringIndexSize => (heapSizes & 0x1) > 0 ? 4 : 2;
+        int BlobIndexSize => (heapSizes & 0x4) > 0 ? 4 : 2;
+
         void ComputeTableInformations()
         {
             uint offset = (uint)BaseStream.Position - table_heap_offset - image.MetadataSection.PointerToRawData; // header
 
-            int stridx_size = (heapSizes & 0x1) > 0 ? 4 : 2;
+            int stridx_size = StringIndexSize;
             int guididx_size = (heapSizes & 0x2) > 0 ? 4 : 2;
-            int blobidx_size = (heapSizes & 0x4) > 0 ? 4 : 2;
+            int blobidx_size = BlobIndexSize;
 
             var heap = image.TableHeap;
             var tables = heap.Tables;
 
-            for (int i = 0; i < TableHeap.TableCount; i++)
+            for (int i = 0; i < Mixin.TableCount; i++)
             {
                 var table = (Table)i;
                 if (!heap.HasTable(table))
@@ -476,6 +487,7 @@ namespace PEFile
                         throw new NotSupportedException();
                 }
 
+                tables[i].RowSize = (uint)size;
                 tables[i].Offset = offset;
 
                 offset += (uint)size * tables[i].Length;
@@ -503,12 +515,104 @@ namespace PEFile
             return new DataDirectory(ReadUInt32(), ReadUInt32());
         }
 
+        uint ReadIndex(CodedIndex codedIndex)
+        {
+            var size = image.GetCodedIndexSize(codedIndex);
+            return size == 2 ? ReadUInt16() : ReadUInt32();
+        }
+
+        string ReadIndexedString()
+        {
+            var index = StringIndexSize == 2 ? ReadUInt16() : ReadUInt32();
+            var value = image.StringHeap.Read(BaseStream, index);
+            return value;
+        }
+
         private Version ReadAssemblyVersion()
         {
             if (!image.TableHeap.HasTable(Table.Assembly))
             {
                 return null;
             }
+
+            uint aivaIndex = 0;
+            {
+                var typeRefTable = image.TableHeap.Tables[(int)Table.TypeRef];
+                for (uint i = 1; i <= typeRefTable.Length; i++)
+                {
+                    var index = (typeRefTable.RowSize * (i-1));
+                    MoveTo(image.TableHeap.offsetInFile + typeRefTable.Offset + index);
+                    Advance(image.GetCodedIndexSize(CodedIndex.ResolutionScope));
+                    var nameIndex = StringIndexSize == 2 ? ReadUInt16() : ReadUInt32();
+                    var nsIndex = StringIndexSize == 2 ? ReadUInt16() : ReadUInt32();
+                    var name = image.StringHeap.Read(BaseStream, nameIndex);
+                    var ns = image.StringHeap.Read(BaseStream, nsIndex);
+
+                    Console.WriteLine($"[{i}] {ns}.{name}");
+                    if (name == "AssemblyInformationalVersionAttribute")
+                    {
+                        aivaIndex = i;
+                        
+                        //break;
+                    }
+                }
+            }
+
+            uint aivaIndexMemberRefParent = aivaIndex << 3 | 0x01;// TypeRef
+
+            uint aivaCtorIndex = 0;
+            {
+                var memberRefTable = image.TableHeap.Tables[(int)Table.MemberRef];
+                for (uint i = 1; i <= memberRefTable.Length; i++)
+                {
+                    /*
+                        size = image.GetCodedIndexSize(CodedIndex.MemberRefParent)    // Class
+                            + stridx_size   // Name
+                            + blobidx_size; // Signature
+                     */
+                    var index = (memberRefTable.RowSize * (i-1));
+                    MoveTo(image.TableHeap.offsetInFile + memberRefTable.Offset + index);
+                    var classIndex = ReadIndex(CodedIndex.MemberRefParent);
+                    var name = ReadIndexedString();
+
+                    Console.WriteLine($"[{i}] Class={classIndex >> 3} (Tag={classIndex & 0x07}) {name}");
+                    if (classIndex == aivaIndexMemberRefParent && name == ".ctor")
+                    {
+                        aivaCtorIndex = i;
+                        
+                        //break;
+                    }
+                }
+            }
+
+            var aivaCtorIndexCustomAttributeType = aivaCtorIndex << 3 | 0x03; // MemberRef
+
+            var customAttrTable = image.TableHeap.Tables[(int)Table.CustomAttribute];
+
+            uint aivaBlob = 0;
+
+            for (uint i = 1; i <= customAttrTable.Length; i++)
+            {
+                /*                        size = image.GetCodedIndexSize(CodedIndex.HasCustomAttribute) // Parent
+                            + image.GetCodedIndexSize(CodedIndex.CustomAttributeType) // Type
+                            + blobidx_size; // Value
+                 */
+                MoveTo(image.TableHeap.offsetInFile + customAttrTable.Offset + (customAttrTable.RowSize * (i-1)));
+                var target = ReadIndex(CodedIndex.HasCustomAttribute);
+                var typeIndex = ReadIndex(CodedIndex.CustomAttributeType);
+                var blobIndex = BlobIndexSize == 2 ? ReadUInt16() : ReadUInt32();
+
+                if (typeIndex == aivaCtorIndexCustomAttributeType)
+                {
+                    Console.WriteLine($"[{i}] {target} Type={typeIndex >> 3} (Tag={typeIndex & 0x07}) {blobIndex}");
+                    aivaBlob = blobIndex;
+                    //break;
+                }
+            }
+
+            var blob = image.BlobHeap.Read(BaseStream, aivaBlob);
+            // Parse with "II.23.3" of https://www.ecma-international.org/publications/files/ECMA-ST/ECMA-335.pdf
+            var s = new string(blob.Select(b => (char)b).ToArray());
 
             var assemblyTable = image.TableHeap.Tables[(int)Table.Assembly];
 
@@ -525,16 +629,16 @@ namespace PEFile
 
         public static Version TryRead(Stream stream)
         {
-            try
-            {
+            /*try
+            {*/
                 var reader = new AssemblyVersionReader(stream);
                 reader.ReadImage();
                 return reader.ReadAssemblyVersion();
-            }
+            /*}
             catch (Exception)
             {
                 return null;
-            }
+            }*/
         }
 
         struct DataDirectory
@@ -630,15 +734,44 @@ namespace PEFile
             GenericParamConstraint = 0x2c,
         }
 
+        static class Mixin
+        {
+            public const int TableCount = 58;
+
+            public static uint ReadCompressedUInt32(Stream stream)
+            {
+                uint integer;
+                byte firstByte = (byte)stream.ReadByte();
+                if ((firstByte & 0x80) == 0)
+                {
+                    integer = firstByte;
+                }
+                else if ((firstByte & 0x40) == 0)
+                {
+                    integer = (uint)(firstByte & ~0x80) << 8;
+                    integer |= (byte)stream.ReadByte();
+                }
+                else
+                {
+                    integer = (uint)(firstByte & ~0xc0) << 24;
+                    integer |= (uint)((byte)stream.ReadByte()) << 16;
+                    integer |= (uint)((byte)stream.ReadByte()) << 8;
+                    integer |= (uint)((byte)stream.ReadByte());
+                }
+                return integer;
+            }
+        }
+
+
         struct TableInformation
         {
+            public uint RowSize;
             public uint Offset;
             public uint Length;
         }
 
         struct TableHeap
         {
-            public const int TableCount = 58;
             public long Valid;
 
             public readonly TableInformation[] Tables;
@@ -648,7 +781,7 @@ namespace PEFile
             public TableHeap(uint offsetInFile, uint size)
             {
                 Valid = 0;
-                Tables = new TableInformation[TableCount];
+                Tables = new TableInformation[Mixin.TableCount];
                 this.offsetInFile = offsetInFile;
                 this.size = size;
             }
@@ -659,12 +792,100 @@ namespace PEFile
             }
         }
 
+        class StringHeap
+        {
+            public readonly uint offsetInFile;
+            public readonly uint size;
+
+            public StringHeap(uint offsetInFile, uint size)
+            {
+                this.offsetInFile = offsetInFile;
+                this.size = size;
+            }
+
+            public string Read(Stream stream, uint index)
+            {
+                if (index == 0)
+                    return string.Empty;
+
+                if (index > size - 1)
+                    return string.Empty;
+
+                return ReadStringAt(stream, index);
+            }
+
+            protected virtual string ReadStringAt(Stream stream, uint index)
+            {
+                var buffer = new MemoryStream();
+                stream.Position = offsetInFile + index;
+
+                while (true)
+                {
+                    var current = (byte)stream.ReadByte();
+                    if (current == 0)
+                        break;
+
+                    buffer.WriteByte(current);
+                }
+
+                return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+            }
+        }
+
+
+        struct BlobHeap
+        {
+            public readonly uint offsetInFile;
+            public readonly uint size;
+
+            public BlobHeap(uint offsetInFile, uint size)
+            {
+                this.offsetInFile = offsetInFile;
+                this.size = size;
+            }
+
+            public byte[] Read(Stream stream, uint index)
+            {
+                if (index == 0 || index > this.size - 1)
+                    return new byte[0];
+
+                stream.Position = offsetInFile + index;
+                int length = (int)Mixin.ReadCompressedUInt32(stream);
+                //4736 - 55429 - 50944 + 4484
+                //if (length > size - stream.Position - offsetInFile + index)
+                //    return new byte[0];
+
+                var buffer = new byte[length];
+
+                stream.Read(buffer, 0, length);
+
+                return buffer;
+            }
+            /*
+            public void GetView(uint signature, out byte[] buffer, out int index, out int length)
+            {
+                if (signature == 0 || signature > data.Length - 1)
+                {
+                    buffer = null;
+                    index = length = 0;
+                    return;
+                }
+
+                buffer = data;
+
+                index = (int)signature;
+                length = (int)Mixin.ReadCompressedUInt32(buffer, ref index);
+            }*/
+        }
+
         sealed class Image
         {
             public Section[] Sections;
 
             public Section MetadataSection;
 
+            public StringHeap StringHeap;
+            public BlobHeap BlobHeap;
             public TableHeap TableHeap;
 
             public uint ResolveVirtualAddress(RVA rva)
