@@ -12,9 +12,11 @@ namespace ConsoleApp1
         static void Main(string[] args)
         {
             var f = @"G:\Code\vbfox-blog\paket.exe";
-            //OldBootstrapperCode(f);
             UsingExtracedCecil(f);
-            
+            //OldBootstrapperCode(f);
+            //UsingExtracedCecil(f);
+            //OldBootstrapperCode(f);
+
             Console.ReadLine();
         }
 
@@ -22,7 +24,7 @@ namespace ConsoleApp1
         {
             string v = null;
             var watch = Stopwatch.StartNew();
-            for (int i = 0; i < 1000; i++)
+            for (int i = 0; i < 1; i++)
             {
                 using (var s = File.OpenRead(f))
                 {
@@ -39,13 +41,16 @@ namespace ConsoleApp1
 
         private static void UsingExtracedCecil(string f)
         {
-            Version v = null;
+            string v = null;
             var watch = Stopwatch.StartNew();
             for (int i = 0; i < 1; i++)
             {
                 using (var s = File.OpenRead(f))
                 {
-                    v = AssemblyVersionReader.TryRead(s);
+                    var bytes = new MemoryStream();
+                    s.CopyTo(bytes);
+                    bytes.Position = 0;
+                    v = AssemblyVersionReader.TryRead(bytes);
                 }
             }
             watch.Stop();

@@ -528,7 +528,7 @@ namespace PEFile
             return value;
         }
 
-        private Version ReadAssemblyVersion()
+        private string ReadAssemblyVersion()
         {
             if (!image.TableHeap.HasTable(Table.Assembly))
             {
@@ -546,17 +546,18 @@ namespace PEFile
                     var nameIndex = StringIndexSize == 2 ? ReadUInt16() : ReadUInt32();
                     var nsIndex = StringIndexSize == 2 ? ReadUInt16() : ReadUInt32();
                     var name = image.StringHeap.Read(BaseStream, nameIndex);
-                    var ns = image.StringHeap.Read(BaseStream, nsIndex);
 
-                    Console.WriteLine($"[{i}] {ns}.{name}");
-                    if (name == "AssemblyInformationalVersionAttribute")
+                    //Console.WriteLine($"[{i}] {ns}.{name}");
+                    if (name == "AssemblyInformationalVersionAttribute" && image.StringHeap.Read(BaseStream, nsIndex) == "System.Reflection")
                     {
                         aivaIndex = i;
                         
-                        //break;
+                        break;
                     }
                 }
             }
+
+            if (aivaIndex == 0) return null;
 
             uint aivaIndexMemberRefParent = aivaIndex << 3 | 0x01;// TypeRef
 
@@ -575,15 +576,17 @@ namespace PEFile
                     var classIndex = ReadIndex(CodedIndex.MemberRefParent);
                     var name = ReadIndexedString();
 
-                    Console.WriteLine($"[{i}] Class={classIndex >> 3} (Tag={classIndex & 0x07}) {name}");
+                    //Console.WriteLine($"[{i}] Class={classIndex >> 3} (Tag={classIndex & 0x07}) {name}");
                     if (classIndex == aivaIndexMemberRefParent && name == ".ctor")
                     {
                         aivaCtorIndex = i;
                         
-                        //break;
+                        break;
                     }
                 }
             }
+
+            if (aivaCtorIndex == 0) return null;
 
             var aivaCtorIndexCustomAttributeType = aivaCtorIndex << 3 | 0x03; // MemberRef
 
@@ -604,30 +607,44 @@ namespace PEFile
 
                 if (typeIndex == aivaCtorIndexCustomAttributeType)
                 {
-                    Console.WriteLine($"[{i}] {target} Type={typeIndex >> 3} (Tag={typeIndex & 0x07}) {blobIndex}");
+                    // Console.WriteLine($"[{i}] {target} Type={typeIndex >> 3} (Tag={typeIndex & 0x07}) {blobIndex}");
                     aivaBlob = blobIndex;
-                    //break;
+                    break;
                 }
             }
 
-            var blob = image.BlobHeap.Read(BaseStream, aivaBlob);
-            // Parse with "II.23.3" of https://www.ecma-international.org/publications/files/ECMA-ST/ECMA-335.pdf
-            var s = new string(blob.Select(b => (char)b).ToArray());
+            if (aivaBlob == 0) return null;
 
-            var assemblyTable = image.TableHeap.Tables[(int)Table.Assembly];
+            // Custom attribute blob
+            // "II.23.3" of https://www.ecma-international.org/publications/files/ECMA-ST/ECMA-335.pdf
+            var blobSize = image.BlobHeap.MoveTo(BaseStream, aivaBlob);
+            if (blobSize == 0) return null;
 
-            MoveTo(image.TableHeap.offsetInFile + assemblyTable.Offset);
-            Advance(4);
-
-            var major = ReadUInt16();
-            var minor = ReadUInt16();
-            var build = ReadUInt16();
-            var revision = ReadUInt16();
-
-            return new Version(major, minor, build, revision);
+            var prolog = ReadUInt16();
+            if (prolog != 0x0001) return null;
+            
+            return ReadUTF8String();
         }
 
-        public static Version TryRead(Stream stream)
+        string ReadUTF8String()
+        {
+            var firstByte = ReadByte();
+            if (firstByte == 0xFF)
+            {
+                return null;
+            }
+            Advance(-1);
+
+            var length = (int)Mixin.ReadCompressedUInt32(BaseStream);
+            if (length == 0)
+                return string.Empty;
+
+            var buffer = new byte[length];
+            Read(buffer, 0, length);
+            return Encoding.UTF8.GetString(buffer, 0, length);
+        }
+
+        public static string TryRead(Stream stream)
         {
             /*try
             {*/
@@ -843,6 +860,16 @@ namespace PEFile
                 this.offsetInFile = offsetInFile;
                 this.size = size;
             }
+
+            public int MoveTo(Stream stream, uint index)
+            {
+                if (index == 0 || index > this.size - 1)
+                    return 0;
+
+                stream.Position = offsetInFile + index;
+                return (int)Mixin.ReadCompressedUInt32(stream);
+            }
+            /*
 
             public byte[] Read(Stream stream, uint index)
             {
