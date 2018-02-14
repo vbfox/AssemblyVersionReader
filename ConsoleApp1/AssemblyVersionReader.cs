@@ -849,7 +849,6 @@ namespace PEFile
             }
         }
 
-
         struct BlobHeap
         {
             public readonly uint offsetInFile;
@@ -869,40 +868,6 @@ namespace PEFile
                 stream.Position = offsetInFile + index;
                 return (int)Mixin.ReadCompressedUInt32(stream);
             }
-            /*
-
-            public byte[] Read(Stream stream, uint index)
-            {
-                if (index == 0 || index > this.size - 1)
-                    return new byte[0];
-
-                stream.Position = offsetInFile + index;
-                int length = (int)Mixin.ReadCompressedUInt32(stream);
-                //4736 - 55429 - 50944 + 4484
-                //if (length > size - stream.Position - offsetInFile + index)
-                //    return new byte[0];
-
-                var buffer = new byte[length];
-
-                stream.Read(buffer, 0, length);
-
-                return buffer;
-            }
-            /*
-            public void GetView(uint signature, out byte[] buffer, out int index, out int length)
-            {
-                if (signature == 0 || signature > data.Length - 1)
-                {
-                    buffer = null;
-                    index = length = 0;
-                    return;
-                }
-
-                buffer = data;
-
-                index = (int)signature;
-                length = (int)Mixin.ReadCompressedUInt32(buffer, ref index);
-            }*/
         }
 
         sealed class Image

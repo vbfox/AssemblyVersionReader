@@ -13,7 +13,8 @@ namespace ConsoleApp1
         {
             var f = @"G:\Code\vbfox-blog\paket.exe";
             UsingExtracedCecil(f);
-            //OldBootstrapperCode(f);
+            OldBootstrapperCode(f);
+
             //UsingExtracedCecil(f);
             //OldBootstrapperCode(f);
 
@@ -24,13 +25,15 @@ namespace ConsoleApp1
         {
             string v = null;
             var watch = Stopwatch.StartNew();
-            for (int i = 0; i < 1; i++)
+            using (var s = File.OpenRead(f))
             {
-                using (var s = File.OpenRead(f))
-                {
-                    var bytes = new MemoryStream();
-                    s.CopyTo(bytes);
-                    var attr = Assembly.Load(bytes.ToArray()).GetCustomAttributes(typeof(AssemblyInformationalVersionAttribute), false).Cast<AssemblyInformationalVersionAttribute>().FirstOrDefault();
+                var bytes = new MemoryStream();
+                s.CopyTo(bytes);
+                var arr = bytes.ToArray();
+                for (int i = 0; i < 1000; i++)
+            {
+
+                    var attr = Assembly.Load(arr).GetCustomAttributes(typeof(AssemblyInformationalVersionAttribute), false).Cast<AssemblyInformationalVersionAttribute>().FirstOrDefault();
                     v = attr.InformationalVersion;
                 }
             }
@@ -43,12 +46,13 @@ namespace ConsoleApp1
         {
             string v = null;
             var watch = Stopwatch.StartNew();
-            for (int i = 0; i < 1; i++)
+            using (var s = File.OpenRead(f))
             {
-                using (var s = File.OpenRead(f))
-                {
-                    var bytes = new MemoryStream();
-                    s.CopyTo(bytes);
+                var bytes = new MemoryStream();
+                s.CopyTo(bytes);
+                for (int i = 0; i < 1000; i++)
+            {
+
                     bytes.Position = 0;
                     v = AssemblyVersionReader.TryRead(bytes);
                 }
